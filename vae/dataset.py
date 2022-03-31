@@ -22,5 +22,5 @@ def build_dataset(args):
     images = [im for im in os.listdir(args.folder) if im.endswith('.png')]
     images = torch.tensor(np.array(images))
 
-    return CarlaDataset(images)
+    return CarlaDataset(images), None
 
