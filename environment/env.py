@@ -31,7 +31,7 @@ class Env(gym.Env):
         self.vae = vae
         self.z_size = None
         if vae is not None:
-            self.z_size = vae.z_size
+            self.z_size = vae.zdim
         
         self.observation_space = spaces.Box(low=np.finfo(np.float32).min,
             high=np.finfo(np.float32).max,

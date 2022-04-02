@@ -15,7 +15,8 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize, VecFrame
 from stable_baselines3.sac import MlpPolicy as SACPolicy
 from stable_baselines3.ddpg import MlpPolicy as DDPGPolicy
 
-from algos import DDPG, SAC
+# from algos import DDPG, SAC
+from stable_baselines3 import DDPG, SAC
 from environment.env import Env
 
 from vae.model import VAE
