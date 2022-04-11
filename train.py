@@ -15,8 +15,8 @@ from stable_baselines3.common.utils import constant_fn
 from config import MIN_THROTTLE, MAX_THROTTLE, FRAME_SKIP,\
     SIM_PARAMS, N_COMMAND_HISTORY, BASE_ENV, ENV_ID, MAX_STEERING_DIFF
 from utils.utils import make_env, ALGOS, linear_schedule, get_latest_run_id, load_vae, create_callback
-from environment.carla.client import make_carla_client
-# import carla
+# from environment.carla.client import make_carla_client
+import carla
 
 def train(args):
     set_random_seed(args.seed)
@@ -72,8 +72,8 @@ def train(args):
         n_timesteps = int(hyperparams['n_timesteps'])
     del hyperparams['n_timesteps']
 
-    with make_carla_client('localhost', 2000) as client:
-        # client.set_timeout(10.0)
+    with carla.Client('localhost', 2000) as client:
+        client.set_timeout(10.0)
         print("CarlaClient connected")
 
         env = DummyVecEnv([make_env(client, args.seed, vae=vae)])
