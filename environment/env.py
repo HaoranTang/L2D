@@ -32,6 +32,8 @@ class Env(gym.Env):
         self.z_size = None
         if vae is not None:
             self.z_size = vae.zdim
+        else:
+            print("NO VAE")
         
         self.observation_space = spaces.Box(low=np.finfo(np.float32).min,
             high=np.finfo(np.float32).max,
@@ -128,7 +130,7 @@ class Env(gym.Env):
             im = sensor_data['CameraRGB'].data
             im = np.array(im)
             im = im[:, :, ::-1] # convert to BGR
-            observation = self.vae(im)
+            _, observation, _ = self.vae(im)
             reward, done = self.reward(measurements, action)
 
         self.last_throttle = action[1]
@@ -164,7 +166,7 @@ class Env(gym.Env):
         im = sensor_data['CameraRGB'].data
         im = np.array(im)
         im = im[:, :, ::-1] # convert to BGR
-        observation = self.vae(im)
+        _, observation, _ = self.vae(im)
 
         self.command_history = np.zeros((1, self.n_commands * self.n_command_history))
 

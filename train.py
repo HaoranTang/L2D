@@ -10,10 +10,13 @@ import yaml
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import VecFrameStack, DummyVecEnv
 from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
+from stable_baselines3.common.utils import constant_fn
 
-from config import SIM_PARAMS, BASE_ENV, ENV_ID
+from config import MIN_THROTTLE, MAX_THROTTLE, FRAME_SKIP,\
+    SIM_PARAMS, N_COMMAND_HISTORY, BASE_ENV, ENV_ID, MAX_STEERING_DIFF
 from utils.utils import make_env, ALGOS, linear_schedule, get_latest_run_id, load_vae, create_callback
 from environment.carla.client import make_carla_client
+# import carla
 
 def train(args):
     set_random_seed(args.seed)
@@ -25,11 +28,11 @@ def train(args):
     vae = None
     if args.vae_path != '':
         print("Loading VAE ...")
-        vae = load_vae(args.vae_path)
+        vae = load_vae(args.vae_path, args.zdim)
 
     # Load hyperparameters from yaml file
-    with open('hyperparams/{}.yml'.format(args.algo), 'r') as f:
-        hyperparams = yaml.load(f)[BASE_ENV]
+    with open('./hyperparams/{}.yml'.format(args.algo), 'r') as f:
+        hyperparams = yaml.safe_load(f)[BASE_ENV]
 
     # Sort hyperparams that will be saved
     saved_hyperparams = OrderedDict([(key, hyperparams[key]) for key in sorted(hyperparams.keys())])
@@ -58,10 +61,10 @@ def train(args):
                 schedule, initial_value = hyperparams[key].split('_')
                 initial_value = float(initial_value)
                 hyperparams[key] = linear_schedule(initial_value)
-            # elif isinstance(hyperparams[key], float):
-            #     hyperparams[key] = constfn(hyperparams[key])
+            elif isinstance(hyperparams[key], float):
+                hyperparams[key] = constant_fn(hyperparams[key])
             else:
-                raise ValueError('Invalid valid for {}: {}'.format(key, hyperparams[key]))
+                raise ValueError('Invalid value for {}: {}'.format(key, hyperparams[key]))
 
     if args.n_timesteps > 0:
         n_timesteps = args.n_timesteps
@@ -70,6 +73,7 @@ def train(args):
     del hyperparams['n_timesteps']
 
     with make_carla_client('localhost', 2000) as client:
+        # client.set_timeout(10.0)
         print("CarlaClient connected")
 
         env = DummyVecEnv([make_env(client, args.seed, vae=vae)])
@@ -134,16 +138,19 @@ if __name__ == '__main__':
                         default='', type=str)
     parser.add_argument('--algo', help='RL Algorithm', default='sac',
                         type=str, required=False, choices=list(ALGOS.keys()))
-    parser.add_argument('-n', '--n-timesteps', help='Overwrite the number of timesteps', default=-1,
+    parser.add_argument('-n', '--n-timesteps', help='Overwrite the number of timesteps', default=10000,
                         type=int)
-    parser.add_argument('--log-interval', help='Override log interval (default: -1, no change)', default=-1,
+    parser.add_argument('--log-interval', help='Override log interval (default: -1, no change)', default=100,
                         type=int)
     parser.add_argument('-f', '--log-folder', help='Log folder', type=str, default='logs')
-    parser.add_argument('-vae', '--vae-path', help='Path to saved VAE', type=str, default='')
+    parser.add_argument('-vae', '--vae-path', help='Path to saved VAE', type=str, default='logs/train_epoch_9.pth')
+    parser.add_argument('--zdim', help='Latent space dimension', type=int, default=512)
     parser.add_argument('--save-vae', action='store_true', default=False,
                         help='Save VAE')
-    parser.add_argument('--seed', help='Random generator seed', type=int, default=0)
+    parser.add_argument('--seed', help='Random generator seed', type=int, default=42)
     args = parser.parse_args()
 
     # train the RL model
     train(args)
+    # with make_carla_client('localhost', 2000) as client:
+    #     print("CarlaClient connected")

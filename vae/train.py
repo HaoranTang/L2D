@@ -6,10 +6,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .model import VAE, create_optimizer, loss_function
-from .dataset import build_dataset
+from model import VAE, create_optimizer, loss_function
+from dataset import build_dataset
 
-def train(args):
+def train(args, testing=True):
     torch.manual_seed(args.seed)
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
@@ -30,7 +30,7 @@ def train(args):
     )
 
     # create model
-    vae = VAE(zdim=args.zdim, training=True).to(device)
+    vae = VAE(zdim=args.zdim).to(device)
 
     # create optimizer
     optimizer = create_optimizer(args, vae)
@@ -41,9 +41,12 @@ def train(args):
     # train loop
     for epoch in range(args.epochs):
         for i, batch in enumerate(train_dataloader):
+            # if testing:
+            #     print(batch[0])
+            #     break
             batch = batch.to(device)
             recon_batch, mean, log_var = vae(batch)
-            loss = loss_function(recon_batch, batch, mean, log_var, args.beta)
+            loss, MSE, KLD = loss_function(recon_batch, batch, mean, log_var, args.beta)
 
             loss_value = loss.item()
             training_loss_list.append(loss_value)
@@ -53,11 +56,11 @@ def train(args):
             optimizer.step()
 
             if i % 100 == 0:
-                print("epoch:", epoch, "train loss:", loss_value)
+                print("epoch:", epoch, "train loss:", loss_value, "MSE:", MSE, "KLD: ", KLD)
 
         # save checkpoint
         if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:
-            path = 'logs_noaug_mini/train_epoch_' + str(epoch) + '.pth'
+            path = 'logs/train_epoch_' + str(epoch) + '.pth'
             torch.save({
                 'epoch': epoch,
                 'model': vae.state_dict(),
@@ -69,10 +72,10 @@ if __name__ == "__main__":
     # argument parser
     parser = argparse.ArgumentParser()
     parser.add_argument('-f', '--folder', help='Path to a folder containing images for training', type=str,
-                    default='./recorded_data/')
+                    default='./recorded_data')
     parser.add_argument('--zdim', help='Latent space dimension', type=int, default=512)
     parser.add_argument('--seed', help='Random generator seed', type=int, default=42)
-    parser.add_argument('--batch-size', help='Batch size', type=int, default=64)
+    parser.add_argument('--batch-size', help='Batch size', type=int, default=16)
     parser.add_argument('--learning-rate', help='Learning rate', type=float, default=1e-4)
     parser.add_argument('--kl-tolerance', help='KL tolerance (to cap KL loss)', type=float, default=0.5)
     parser.add_argument('--beta', help='Weight for kl loss', type=float, default=1.0)

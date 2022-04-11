@@ -46,8 +46,8 @@ class TinySACPolicy(SACPolicy):
 class CustomSACPolicy(SACPolicy):
     def __init__(self, *args, **kwargs):
         super(CustomSACPolicy, self).__init__(*args, **kwargs,
-                                              layers=[64, 64],
-                                              feature_extraction="mlp")
+                                              net_arch=[64, 64])
+                                    
 
 class CustomDDPGPolicy(DDPGPolicy):
     def __init__(self, *args, **kwargs):
@@ -73,7 +73,7 @@ def load_vae(path=None, z_size=None):
     if z_size is None:
         assert path is not None
 
-    vae = VAE(zdim=z_size, training=False)
+    vae = VAE(zdim=z_size)
     if path is not None:
         checkpoint = torch.load(path)
         vae.load_state_dict(checkpoint['model'])

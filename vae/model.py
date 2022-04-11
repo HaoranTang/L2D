@@ -10,11 +10,10 @@ class VAE(torch.nn.Module):
     training: (bool)
     """
 
-    def __init__(self, zdim=512, training=True):
+    def __init__(self, zdim=512):
         super(VAE, self).__init__()
 
         self.zdim = zdim
-        self.training = training
 
         self.encoder = nn.Sequential(
             nn.Conv2d(3, 32, kernel_size=4, stride=2),
@@ -28,14 +27,14 @@ class VAE(torch.nn.Module):
         )
 
         self.mean_out = nn.Sequential(
-            nn.Linear(3 * 8 * 256, self.zdim),
+            nn.Linear(256 * 3 * 8, self.zdim),
         )
         self.log_var_out = nn.Sequential(
-            nn.Linear(3 * 8 * 256, self.zdim),
+            nn.Linear(256 * 3 * 8, self.zdim),
         )
 
         self.z_out = nn.Sequential(
-            nn.Linear(self.zdim, 3 * 8 * 256),
+            nn.Linear(self.zdim, 256 * 3 * 8),
         )
 
         self.decoder = nn.Sequential(
@@ -43,7 +42,7 @@ class VAE(torch.nn.Module):
             nn.ReLU(),
             nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2),
             nn.ReLU(),
-            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2),
+            nn.ConvTranspose2d(64, 32, kernel_size=5, stride=2),
             nn.ReLU(),
             nn.ConvTranspose2d(32, 3, kernel_size=4, stride=2),
             nn.Sigmoid(),
@@ -54,23 +53,21 @@ class VAE(torch.nn.Module):
 
         # encoder
         h = self.encoder(x)
+        # print("h shape:", h.shape)
         h = h.view(batch, -1)
         mean = self.mean_out(h)
         log_var = self.log_var_out(h)
         sigma = torch.exp(log_var / 2.0)
         eps = torch.randn_like(mean)
 
-        if self.training:
-            z = mean + sigma * eps
+        z = mean + sigma * eps
 
-            # decoder
-            h = self.z_out(z)
-            h = h.view(batch, 3, 8, 256)
-            h = self.decoder(h)
+        # decoder
+        h = self.z_out(z)
+        h = h.view(batch, 256, 3, 8)
+        h = self.decoder(h)
 
-            return h, mean, log_var
-        else:
-            return mean
+        return h, mean, log_var
 
 def create_optimizer(args, model):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
@@ -78,7 +75,7 @@ def create_optimizer(args, model):
 
 def loss_function(recon_batch, batch, mean, log_var, beta):
     batch_size = recon_batch.shape[0]
-    BCE = nn.BCELoss(reduction='sum')(recon_batch, batch) / batch_size
+    MSE = torch.sum((recon_batch - batch) ** 2) / batch_size
     KLD = 0.5 * torch.sum(torch.exp(log_var) + mean ** 2 - 1 - log_var) / batch_size
 
-    return BCE + beta * KLD
+    return MSE + beta * KLD, MSE, KLD
