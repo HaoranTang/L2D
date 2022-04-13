@@ -10,54 +10,23 @@ from PIL import Image
 import numpy as np
 import cv2
 import torchvision.transforms as transforms
-
-from config import INPUT_DIM, MIN_STEERING, MAX_STEERING, JERK_REWARD_WEIGHT, MAX_STEERING_DIFF
-from config import ROI, THROTTLE_REWARD_WEIGHT, MAX_THROTTLE, MIN_THROTTLE, REWARD_CRASH, CRASH_SPEED_WEIGHT
-# from environment.carla.client import make_carla_client, CarlaClient 
-# from environment.carla.tcp import TCPConnectionError
-# from environment.carla.settings import CarlaSettings
-# from environment.carla.sensor import Camera
-# from environment.carla.carla_server_pb2 import Control
+import torch
 import carla
 from queue import Queue
+
+from config import INPUT_DIM, MIN_STEERING, MAX_STEERING, JERK_REWARD_WEIGHT, MAX_STEERING_DIFF
+
 
 class Env(gym.Env):
     def __init__(self, client, vae=None, min_throttle=0.4, max_throttle=0.6, n_command_history=20, frame_skip=1, n_stack=1, action_lambda=0.5):
         self.client = client
         self.world = self.client.get_world()
-        # self.world.apply_settings(carla.WorldSettings(
-        #     no_rendering_mode=False,
-        #     synchronous_mode=True,
-        #     fixed_delta_seconds=0.05))
+        self.frame = self.world.apply_settings(carla.WorldSettings(
+            synchronous_mode=True,
+            fixed_delta_seconds=0.05))
 
         self.blueprint_library = self.world.get_blueprint_library()
-
-        bp = random.choice(self.blueprint_library.filter('vehicle')) # randomly choose a vehicle
-        transform = random.choice(self.world.get_map().get_spawn_points()) # randomly choose a start position
-        self.vehicle = self.world.spawn_actor(bp, transform) # vehicle object
-        self.actor_list = [self.vehicle]
-
-        camera_bp = self.blueprint_library.find('sensor.camera.rgb')
-        camera_bp.set_attribute('image_size_x', '800')
-        camera_bp.set_attribute('image_size_y', '800')
-        camera_bp.set_attribute('fov', '110')
-        camera_bp.set_attribute('sensor_tick', '0.1')
-        camera_location = carla.Location(-5.673639, 0., 2.441947)
-        camera_rotation = carla.Rotation(8.0, 0.0, 0.0)
-        camera_transform = carla.Transform(camera_location, camera_rotation)
-        self.camera = self.world.spawn_actor(camera_bp, camera_transform, attach_to=self.vehicle, attachment_type=carla.AttachmentType.SpringArm)
-        self.actor_list.append(self.camera)
-
-        self.camera_queue = Queue()
-
-        lane_bp = self.blueprint_library.find('sensor.other.lane_invasion')
-        lane_location = carla.Location(0,0,0)
-        lane_rotation = carla.Rotation(0,0,0)
-        lane_transform = carla.Transform(lane_location,lane_rotation)
-        self.lane_detection = self.world.spawn_actor(lane_bp, lane_transform, attach_to=self.vehicle, attachment_type=carla.AttachmentType.Rigid)
-        self.actor_list.append(self.lane_detection)
-
-        self.lane_queue = Queue()
+        self.actor_list = []
 
         # save last n commands
         self.n_commands = 2
@@ -175,23 +144,30 @@ class Env(gym.Env):
                 while not self.camera_queue.empty():
                     im = self.camera_queue.get(True, None)
 
-            if self.camera_queue.empty():
+            if self.lane_queue.empty():
                 lane_det = None
             else:
-                while not self.camera_queue.empty():
-                    lane_det = self.camera_queue.get(True, None)
+                while not self.lane_queue.empty():
+                    lane_det = self.lane_queue.get(True, None)
+            
+            if self.collision_queue.empty():
+                collision_det = None
+            else:
+                while not self.collision_queue.empty():
+                    collision_det = self.collision_queue.get(True, None)
                     
             im = np.array(im.raw_data).reshape((800, 800, 4))
             im = im[:, :, :3] # convert to BGR
             im = preprocess_image(im)
             transform = transforms.ToTensor()
             im = transform(im)[None, :]
-            _, observation, _ = self.vae(im)
+            with torch.no_grad():
+                _, observation, _ = self.vae(im)
 
             observation = observation.detach().numpy()
 
             assert(velocity is not None)
-            reward, done = self.reward(velocity, lane_det, action)
+            reward, done = self.reward(velocity, lane_det, collision_det, action)
 
         self.last_throttle = action[1]
 
@@ -201,51 +177,60 @@ class Env(gym.Env):
 
     def reset(self):
         print("Start to reset env")
-        # settings = CarlaSettings()
-        # settings.set(
-        #     SynchronousMode=True,
-        #     SendNonPlayerAgentsInfo=False,
-        #     NumberOfVehicles=0,
-        #     NumberOfPedestrians=0,
-        #     WeatherId=random.choice([1]),
-        #     QualityLevel='Epic'
-        # )
-        # settings.randomize_seeds()
-        # camera = Camera('CameraRGB')
-        # camera.set(FOV=100)
-        # camera.set_image_size(160, 120)
-        # camera.set_position(2.0, 0.0, 1.4)
-        # camera.set_rotation(-15.0, 0, 0)
-        # settings.add_sensor(camera)
+        self.destroy_agents()
+        
+        # vehicle 
+        bp = random.choice(self.blueprint_library.filter('vehicle.*')) # randomly choose a vehicle
+        transform = random.choice(self.world.get_map().get_spawn_points()) # randomly choose a start position
+        self.vehicle = self.world.spawn_actor(bp, transform) # vehicle object
+        self.actor_list = [self.vehicle]
+
+        # camera
+        camera_bp = self.blueprint_library.find('sensor.camera.rgb')
+        camera_bp.set_attribute('image_size_x', '800')
+        camera_bp.set_attribute('image_size_y', '800')
+        camera_bp.set_attribute('fov', '90')
+        camera_bp.set_attribute('sensor_tick', '0.1')
+        camera_location = carla.Location(-5.673639, 0., 2.441947)
+        camera_rotation = carla.Rotation(8.0, 0.0, 0.0)
+        camera_transform = carla.Transform(camera_location, camera_rotation)
+        self.camera = self.world.spawn_actor(camera_bp, camera_transform, attach_to=self.vehicle, attachment_type=carla.AttachmentType.SpringArm)
+        self.actor_list.append(self.camera)
+        self.camera_queue = Queue()
+
+        # lane detection
+        lane_bp = self.blueprint_library.find('sensor.other.lane_invasion')
+        lane_location = carla.Location(0,0,0)
+        lane_rotation = carla.Rotation(0,0,0)
+        lane_transform = carla.Transform(lane_location, lane_rotation)
+        self.lane_detection = self.world.spawn_actor(lane_bp, lane_transform, attach_to=self.vehicle, attachment_type=carla.AttachmentType.Rigid)
+        self.actor_list.append(self.lane_detection)
+        self.lane_queue = Queue()
+
+        # collision detection
+        collision_bp = self.blueprint_library.find('sensor.other.collision')
+        collision_location = carla.Location(0,0,0)
+        collision_rotation = carla.Rotation(0,0,0)
+        collision_transform = carla.Transform(collision_location, collision_rotation)
+        self.collision_detection = self.world.spawn_actor(collision_bp, collision_transform, attach_to=self.vehicle, attachment_type=carla.AttachmentType.Rigid)
+        self.actor_list.append(self.collision_detection)
+        self.collision_queue = Queue()
+
         observation = None
 
-        # scene = self.client.load_settings(settings)
-        # number_of_player_starts = len(scene.player_start_spots)
-        # player_start = random.randint(0, max(0, number_of_player_starts - 1))
-        # self.client.start_episode(player_start)
-
-        # measurements, sensor_data = self.client.read_data()
-        # im = sensor_data['CameraRGB'].data
-
-        def store_image(image):
-            assert(image is not None)
-            self.camera_queue.put(image)
-        self.camera.listen(lambda image: store_image(image))
-
-        def store_lane(lane):
-            assert(lane is not None)
-            self.lane_queue.put(lane)
-        self.lane_detection.listen(lambda lane: store_lane(lane))
+        # start listening
+        self.camera.listen(lambda image: self.camera_queue.put(image))
+        self.lane_detection.listen(lambda lane: self.lane_queue.put(lane))
+        self.collision_detection.listen(lambda collision: self.collision_queue.put(collision))
 
         im = self.camera_queue.get(True, None)
-        # self.camera.listen(lambda image: image.save_to_disk('_out/%06d.png' % image.frame))
-        # print(self.im.raw_data.shape)
         im = np.array(im.raw_data).reshape((800, 800, 4))
         im = im[:, :, :3] # convert to BGR
         im = preprocess_image(im)
         transform = transforms.ToTensor()
         im = transform(im)[None, :]
-        _, observation, _ = self.vae(im)
+        with torch.no_grad():
+            _, observation, _ = self.vae(im)
         
         observation = observation.detach().numpy()
         self.command_history = np.zeros((1, self.n_commands * self.n_command_history))
@@ -262,24 +247,41 @@ class Env(gym.Env):
         return observation
 
 
-    def reward(self, velocity, lane_det, action):
+    def reward(self, velocity, lane_det, collision_det, action):
         """
         :param measurements:
         :return: reward, done
         """
         done = False
 
-        """distance"""
-
         """speed"""
         # # In the wayve.ai paper, speed has been used as reward
-        speed_reward = velocity
+        speed_reward = 10 * velocity
 
         """road"""
-        if lane_det is not None and len(lane_det.crossed_lane_markings) > 0:
-            return 0, True
+        if collision_det is not None:
+            return -100.0, True
+
+        if lane_det is not None:
+            return -10.0, True
 
         return speed_reward, done
+    
+    def destroy_agents(self):
+        for actor in self.actor_list:
+
+            # If it has a callback attached, remove it first
+            if hasattr(actor, 'is_listening') and actor.is_listening:
+                actor.stop()
+
+            # If it's still alive - desstroy it
+            if actor.is_alive:
+                actor.destroy()
+
+        self.actor_list = []
+        self.camera_queue = Queue()
+        self.lane_queue = Queue()
+        self.collision_queue = Queue()
 
 
 
