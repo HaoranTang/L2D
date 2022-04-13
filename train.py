@@ -78,6 +78,7 @@ def train(args):
     print("CarlaClient connected")
 
     env = DummyVecEnv([make_env(client, args.seed, vae=vae)])
+    eval_env = DummyVecEnv([make_env(client, args.seed, vae=vae)])
 
     # Optional Frame-stacking
     n_stack = 1
@@ -115,9 +116,7 @@ def train(args):
         kwargs = {'log_interval': args.log_interval}
 
     if args.algo == 'sac':
-        kwargs.update({'callback': create_callback(args.algo,
-                                                os.path.join(save_path, ENV_ID + "_best"),
-                                                verbose=1)})
+        kwargs.update({'callback': create_callback(eval_env)})
 
     model.learn(n_timesteps, **kwargs)
 

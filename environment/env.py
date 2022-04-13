@@ -57,6 +57,8 @@ class Env(gym.Env):
         self.lane_detection = self.world.spawn_actor(lane_bp, lane_transform, attach_to=self.vehicle, attachment_type=carla.AttachmentType.Rigid)
         self.actor_list.append(self.lane_detection)
 
+        self.lane_queue = Queue()
+
         # save last n commands
         self.n_commands = 2
         self.n_command_history = n_command_history
@@ -167,33 +169,18 @@ class Env(gym.Env):
             # measurements, sensor_data = self.client.read_data()
             velocity = self.vehicle.get_velocity().length()
 
-            # print("mark1")
-
-            # self.im = None
-            # self.signal = False
-            # def store_image(image):
-            #     assert(image is not None)
-            #     self.im = image
-            #     self.signal = True
-            # self.camera.listen(lambda image: store_image(image))
-            # while not self.signal:
-            #     time.sleep(0.1)
-
             if self.camera_queue.empty():
                 im = self.camera_queue.get(True, None)
             else:
                 while not self.camera_queue.empty():
                     im = self.camera_queue.get(True, None)
-            
-            # print("mark2")
 
-            self.lane_det = None
-            def store_lane(lane):
-                self.lane_det = lane
-            self.lane_detection.listen(lambda lane: store_lane(lane))
-
-            # print("mark3")
-
+            if self.camera_queue.empty():
+                lane_det = None
+            else:
+                while not self.camera_queue.empty():
+                    lane_det = self.camera_queue.get(True, None)
+                    
             im = np.array(im.raw_data).reshape((800, 800, 4))
             im = im[:, :, :3] # convert to BGR
             im = preprocess_image(im)
@@ -203,10 +190,8 @@ class Env(gym.Env):
 
             observation = observation.detach().numpy()
 
-            # print("mark4")
-
             assert(velocity is not None)
-            reward, done = self.reward(velocity, self.lane_det, action)
+            reward, done = self.reward(velocity, lane_det, action)
 
         self.last_throttle = action[1]
 
@@ -246,6 +231,12 @@ class Env(gym.Env):
             assert(image is not None)
             self.camera_queue.put(image)
         self.camera.listen(lambda image: store_image(image))
+
+        def store_lane(lane):
+            assert(lane is not None)
+            self.lane_queue.put(lane)
+        self.lane_detection.listen(lambda lane: store_lane(lane))
+
         im = self.camera_queue.get(True, None)
         # self.camera.listen(lambda image: image.save_to_disk('_out/%06d.png' % image.frame))
         # print(self.im.raw_data.shape)

@@ -14,6 +14,7 @@ from stable_baselines3.common.policies import register_policy
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize, VecFrameStack
 from stable_baselines3.sac import MlpPolicy as SACPolicy
 from stable_baselines3.ddpg import MlpPolicy as DDPGPolicy
+from stable_baselines3.common.callbacks import EvalCallback
 
 # from algos import DDPG, SAC
 from stable_baselines3 import DDPG, SAC
@@ -239,7 +240,7 @@ def get_saved_hyperparams(stats_path, norm_reward=False):
     return hyperparams, stats_path
 
 
-def create_callback(algo, save_path, verbose=1):
+def create_callback(eval_env):
     """
     Create callback function for saving best model frequently.
 
@@ -248,30 +249,35 @@ def create_callback(algo, save_path, verbose=1):
     :param verbose: (int)
     :return: (function) the callback function
     """
-    if algo != 'sac':
-        raise NotImplementedError("Callback creation not implemented yet for {}".format(algo))
+    # if algo != 'sac':
+    #     raise NotImplementedError("Callback creation not implemented yet for {}".format(algo))
 
-    def sac_callback(_locals, _globals):
-        """
-        Callback for saving best model when using SAC.
+    # def sac_callback(_locals, _globals):
+    #     """
+    #     Callback for saving best model when using SAC.
 
-        :param _locals: (dict)
-        :param _globals: (dict)
-        :return: (bool) If False: stop training
-        """
-        global best_mean_reward
-        # print(_locals)
-        # episode_rewards = _locals['episode_rewards']
-        # if len(episode_rewards[-101:-1]) == 0:
-        #     return True
-        # else:
-        #     mean_reward = round(float(np.mean(episode_rewards[-101:-1])), 1)
-        mean_reward = _locals['rewards'][0]
-        if mean_reward > best_mean_reward:
-            if verbose >= 1:
-                print("Saving best model")
-            _locals['self'].save(save_path)
-            best_mean_reward = mean_reward
+    #     :param _locals: (dict)
+    #     :param _globals: (dict)
+    #     :return: (bool) If False: stop training
+    #     """
+    #     global best_mean_reward
+    #     # print(_locals)
+    #     # episode_rewards = _locals['episode_rewards']
+    #     # if len(episode_rewards[-101:-1]) == 0:
+    #     #     return True
+    #     # else:
+    #     #     mean_reward = round(float(np.mean(episode_rewards[-101:-1])), 1)
+    #     mean_reward = _locals['rewards'][0]
+    #     if mean_reward > best_mean_reward:
+    #         if verbose >= 1:
+    #             print("Saving best model")
+    #         _locals['self'].save(save_path)
+    #         best_mean_reward = mean_reward
 
-        return True
-    return sac_callback
+    #     return True
+    # return sac_callback
+
+    eval_callback = EvalCallback(eval_env, best_model_save_path='./logs/',
+                             log_path='./logs/', eval_freq=500,
+                             deterministic=True, render=True)
+    return eval_callback
