@@ -72,63 +72,64 @@ def train(args):
         n_timesteps = int(hyperparams['n_timesteps'])
     del hyperparams['n_timesteps']
 
-    with carla.Client('localhost', 2000) as client:
-        client.set_timeout(10.0)
-        print("CarlaClient connected")
+    client = carla.Client('localhost', 2000)
+    # with carla.Client('localhost', 2000) as client:
+    client.set_timeout(10.0)
+    print("CarlaClient connected")
 
-        env = DummyVecEnv([make_env(client, args.seed, vae=vae)])
+    env = DummyVecEnv([make_env(client, args.seed, vae=vae)])
 
-        # Optional Frame-stacking
-        n_stack = 1
-        if hyperparams.get('frame_stack', False):
-            n_stack = hyperparams['frame_stack']
-            env = VecFrameStack(env, n_stack)
-            print("Stacking {} frames".format(n_stack))
-            del hyperparams['frame_stack']
+    # Optional Frame-stacking
+    n_stack = 1
+    if hyperparams.get('frame_stack', False):
+        n_stack = hyperparams['frame_stack']
+        env = VecFrameStack(env, n_stack)
+        print("Stacking {} frames".format(n_stack))
+        del hyperparams['frame_stack']
 
-        # Parse noise string for DDPG
-        if args.algo == 'ddpg' and hyperparams.get('noise_type') is not None:
-            noise_type = hyperparams['noise_type'].strip()
-            noise_std = hyperparams['noise_std']
-            n_actions = env.action_space.shape[0]
-            # if 'adaptive-param' in noise_type:
-            #     hyperparams['param_noise'] = AdaptiveParamNoiseSpec(initial_stddev=noise_std,
-            #                                                         desired_action_stddev=noise_std)
-            if 'normal' in noise_type:
-                hyperparams['action_noise'] = NormalActionNoise(mean=np.zeros(n_actions),
-                                                                sigma=noise_std * np.ones(n_actions))
-            elif 'ornstein-uhlenbeck' in noise_type:
-                hyperparams['action_noise'] = OrnsteinUhlenbeckActionNoise(mean=np.zeros(n_actions),
-                                                                        sigma=noise_std * np.ones(n_actions))
-            else:
-                raise RuntimeError('Unknown noise type "{}"'.format(noise_type))
-            print("Applying {} noise with std {}".format(noise_type, noise_std))
-            del hyperparams['noise_type']
-            del hyperparams['noise_std']
+    # Parse noise string for DDPG
+    if args.algo == 'ddpg' and hyperparams.get('noise_type') is not None:
+        noise_type = hyperparams['noise_type'].strip()
+        noise_std = hyperparams['noise_std']
+        n_actions = env.action_space.shape[0]
+        # if 'adaptive-param' in noise_type:
+        #     hyperparams['param_noise'] = AdaptiveParamNoiseSpec(initial_stddev=noise_std,
+        #                                                         desired_action_stddev=noise_std)
+        if 'normal' in noise_type:
+            hyperparams['action_noise'] = NormalActionNoise(mean=np.zeros(n_actions),
+                                                            sigma=noise_std * np.ones(n_actions))
+        elif 'ornstein-uhlenbeck' in noise_type:
+            hyperparams['action_noise'] = OrnsteinUhlenbeckActionNoise(mean=np.zeros(n_actions),
+                                                                    sigma=noise_std * np.ones(n_actions))
+        else:
+            raise RuntimeError('Unknown noise type "{}"'.format(noise_type))
+        print("Applying {} noise with std {}".format(noise_type, noise_std))
+        del hyperparams['noise_type']
+        del hyperparams['noise_std']
 
-        # Train an agent from scratch
-        model = ALGOS[args.algo](env=env, tensorboard_log=tensorboard_log, verbose=1, **hyperparams)
+    # Train an agent from scratch
+    model = ALGOS[args.algo](env=env, tensorboard_log=tensorboard_log, verbose=1, **hyperparams)
 
-        kwargs = {}
-        if args.log_interval > -1:
-            kwargs = {'log_interval': args.log_interval}
+    kwargs = {}
+    if args.log_interval > -1:
+        kwargs = {'log_interval': args.log_interval}
 
-        if args.algo == 'sac':
-            kwargs.update({'callback': create_callback(args.algo,
-                                                    os.path.join(save_path, ENV_ID + "_best"),
-                                                    verbose=1)})
+    if args.algo == 'sac':
+        kwargs.update({'callback': create_callback(args.algo,
+                                                os.path.join(save_path, ENV_ID + "_best"),
+                                                verbose=1)})
 
-        model.learn(n_timesteps, **kwargs)
+    model.learn(n_timesteps, **kwargs)
 
-        # Save trained model
-        model.save(os.path.join(save_path, ENV_ID))
-        # Save hyperparams
-        with open(os.path.join(params_path, 'config.yml'), 'w') as f:
-            yaml.dump(saved_hyperparams, f)
+    # Save trained model
+    model.save(os.path.join(save_path, ENV_ID))
+    # Save hyperparams
+    with open(os.path.join(params_path, 'config.yml'), 'w') as f:
+        yaml.dump(saved_hyperparams, f)
 
-        if args.save_vae and vae is not None:
-            print("Saving VAE")
-            vae.save(os.path.join(params_path, 'vae'))
+    if args.save_vae and vae is not None:
+        print("Saving VAE")
+        vae.save(os.path.join(params_path, 'vae'))
 
 if __name__ == '__main__':
     # argument parser

@@ -260,11 +260,13 @@ def create_callback(algo, save_path, verbose=1):
         :return: (bool) If False: stop training
         """
         global best_mean_reward
-        episode_rewards = _locals['episode_rewards']
-        if len(episode_rewards[-101:-1]) == 0:
-            return True
-        else:
-            mean_reward = round(float(np.mean(episode_rewards[-101:-1])), 1)
+        # print(_locals)
+        # episode_rewards = _locals['episode_rewards']
+        # if len(episode_rewards[-101:-1]) == 0:
+        #     return True
+        # else:
+        #     mean_reward = round(float(np.mean(episode_rewards[-101:-1])), 1)
+        mean_reward = _locals['rewards'][0]
         if mean_reward > best_mean_reward:
             if verbose >= 1:
                 print("Saving best model")

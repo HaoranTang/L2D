@@ -8,6 +8,8 @@ from gym import spaces
 from gym.utils import seeding
 from PIL import Image
 import numpy as np
+import cv2
+import torchvision.transforms as transforms
 
 from config import INPUT_DIM, MIN_STEERING, MAX_STEERING, JERK_REWARD_WEIGHT, MAX_STEERING_DIFF
 from config import ROI, THROTTLE_REWARD_WEIGHT, MAX_THROTTLE, MIN_THROTTLE, REWARD_CRASH, CRASH_SPEED_WEIGHT
@@ -17,11 +19,17 @@ from config import ROI, THROTTLE_REWARD_WEIGHT, MAX_THROTTLE, MIN_THROTTLE, REWA
 # from environment.carla.sensor import Camera
 # from environment.carla.carla_server_pb2 import Control
 import carla
+from queue import Queue
 
 class Env(gym.Env):
     def __init__(self, client, vae=None, min_throttle=0.4, max_throttle=0.6, n_command_history=20, frame_skip=1, n_stack=1, action_lambda=0.5):
         self.client = client
         self.world = self.client.get_world()
+        # self.world.apply_settings(carla.WorldSettings(
+        #     no_rendering_mode=False,
+        #     synchronous_mode=True,
+        #     fixed_delta_seconds=0.05))
+
         self.blueprint_library = self.world.get_blueprint_library()
 
         bp = random.choice(self.blueprint_library.filter('vehicle')) # randomly choose a vehicle
@@ -30,16 +38,23 @@ class Env(gym.Env):
         self.actor_list = [self.vehicle]
 
         camera_bp = self.blueprint_library.find('sensor.camera.rgb')
-        camera_bp.set_attribute('image_size_x', '1920')
-        camera_bp.set_attribute('image_size_y', '1080')
+        camera_bp.set_attribute('image_size_x', '800')
+        camera_bp.set_attribute('image_size_y', '800')
         camera_bp.set_attribute('fov', '110')
-        camera_transform = carla.Transform(carla.Location(x=0.8, z=1.7))
-        self.camera = self.world.spawn_actor(camera_bp, camera_transform, attach_to=self.vehicle)
+        camera_bp.set_attribute('sensor_tick', '0.1')
+        camera_location = carla.Location(-5.673639, 0., 2.441947)
+        camera_rotation = carla.Rotation(8.0, 0.0, 0.0)
+        camera_transform = carla.Transform(camera_location, camera_rotation)
+        self.camera = self.world.spawn_actor(camera_bp, camera_transform, attach_to=self.vehicle, attachment_type=carla.AttachmentType.SpringArm)
         self.actor_list.append(self.camera)
 
+        self.camera_queue = Queue()
+
         lane_bp = self.blueprint_library.find('sensor.other.lane_invasion')
-        lane_transform = carla.Transform(carla.Location(x=0.8, z=1.7))
-        self.lane_detection = self.world.spawn_actor(lane_bp, lane_transform, attach_to=self.vehicle)
+        lane_location = carla.Location(0,0,0)
+        lane_rotation = carla.Rotation(0,0,0)
+        lane_transform = carla.Transform(lane_location,lane_rotation)
+        self.lane_detection = self.world.spawn_actor(lane_bp, lane_transform, attach_to=self.vehicle, attachment_type=carla.AttachmentType.Rigid)
         self.actor_list.append(self.lane_detection)
 
         # save last n commands
@@ -123,6 +138,8 @@ class Env(gym.Env):
             self.stacked_obs[..., -observation.shape[-1]:] = observation
             return self.stacked_obs, reward, done, info
 
+        # print("postprocessing_step finished")
+
         return observation, reward, done, info
 
     def step(self, action):
@@ -139,19 +156,9 @@ class Env(gym.Env):
             action[0] = prev_steering + diff
 
         # control = Control()
-        # control.throttle = action[1]
-        # control.steer = action[0]
-        # control.brake = 0
-        # control.hand_brake = 0
-        # control.reverse = 0
-        control = carla.VehicleControl(
-            throttle = action[1],
-            steer = action[0],
-            brake = 0.0,
-            hand_brake = False,
-            reverse = False,
-            manual_gear_shift = False,
-            gear = 0)
+        # print(action)
+        # print(type(action[0]), type(action[1]))
+        control = carla.VehicleControl(throttle=float(action[1]), steer=float(action[0]))
 
         # Repeat action if using frame_skip
         for _ in range(self.frame_skip):
@@ -159,24 +166,51 @@ class Env(gym.Env):
             self.vehicle.apply_control(control)
             # measurements, sensor_data = self.client.read_data()
             velocity = self.vehicle.get_velocity().length()
-            im = None
-            def store_image(image):
-                nonlocal im
-                im = image
-            self.camera.listen(lambda image: store_image(image)) 
 
-            lane_det = None
+            # print("mark1")
+
+            # self.im = None
+            # self.signal = False
+            # def store_image(image):
+            #     assert(image is not None)
+            #     self.im = image
+            #     self.signal = True
+            # self.camera.listen(lambda image: store_image(image))
+            # while not self.signal:
+            #     time.sleep(0.1)
+
+            if self.camera_queue.empty():
+                im = self.camera_queue.get(True, None)
+            else:
+                while not self.camera_queue.empty():
+                    im = self.camera_queue.get(True, None)
+            
+            # print("mark2")
+
+            self.lane_det = None
             def store_lane(lane):
-                nonlocal lane_det
-                lane_det = lane
+                self.lane_det = lane
             self.lane_detection.listen(lambda lane: store_lane(lane))
 
-            im = np.array(im)
-            im = im[:, :, ::-1] # convert to BGR
+            # print("mark3")
+
+            im = np.array(im.raw_data).reshape((800, 800, 4))
+            im = im[:, :, :3] # convert to BGR
+            im = preprocess_image(im)
+            transform = transforms.ToTensor()
+            im = transform(im)[None, :]
             _, observation, _ = self.vae(im)
-            reward, done = self.reward(velocity, lane_det, action)
+
+            observation = observation.detach().numpy()
+
+            # print("mark4")
+
+            assert(velocity is not None)
+            reward, done = self.reward(velocity, self.lane_det, action)
 
         self.last_throttle = action[1]
+
+        # print("step finished")
 
         return self.postprocessing_step(action, observation, reward, done, {})
 
@@ -207,15 +241,22 @@ class Env(gym.Env):
 
         # measurements, sensor_data = self.client.read_data()
         # im = sensor_data['CameraRGB'].data
-        im = None
-        def store_image(image):
-            nonlocal im
-            im = image
-        self.camera.listen(lambda image: store_image(image)) 
-        im = np.array(im)
-        im = im[:, :, ::-1] # convert to BGR
-        _, observation, _ = self.vae(im)
 
+        def store_image(image):
+            assert(image is not None)
+            self.camera_queue.put(image)
+        self.camera.listen(lambda image: store_image(image))
+        im = self.camera_queue.get(True, None)
+        # self.camera.listen(lambda image: image.save_to_disk('_out/%06d.png' % image.frame))
+        # print(self.im.raw_data.shape)
+        im = np.array(im.raw_data).reshape((800, 800, 4))
+        im = im[:, :, :3] # convert to BGR
+        im = preprocess_image(im)
+        transform = transforms.ToTensor()
+        im = transform(im)[None, :]
+        _, observation, _ = self.vae(im)
+        
+        observation = observation.detach().numpy()
         self.command_history = np.zeros((1, self.n_commands * self.n_command_history))
 
         if self.n_command_history > 0:
@@ -226,7 +267,7 @@ class Env(gym.Env):
             self.stacked_obs[..., -observation.shape[-1]:] = observation
             return self.stacked_obs
 
-        print('reset finished')
+        # print('reset finished')
         return observation
 
 
@@ -244,7 +285,28 @@ class Env(gym.Env):
         speed_reward = velocity
 
         """road"""
-        if len(lane_det.crossed_lane_markings) > 0:
+        if lane_det is not None and len(lane_det.crossed_lane_markings) > 0:
             return 0, True
 
         return speed_reward, done
+
+
+
+def preprocess_image(image, convert_to_rgb=False):
+    """
+    Crop, resize and normalize image.
+    Optionnally it also converts the image from BGR to RGB.
+    :param image: (np.ndarray) image (BGR or RGB)
+    :param convert_to_rgb: (bool) whether the conversion to rgb is needed or not
+    :return: (np.ndarray)
+    """
+    # Crop
+    # Region of interest
+    image = image[400:, :]
+    # Resize
+    im = cv2.resize(image, (160, 80), interpolation=cv2.INTER_AREA)
+    # Convert BGR to RGB
+    if convert_to_rgb:
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+
+    return im
