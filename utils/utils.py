@@ -279,5 +279,5 @@ def create_callback(eval_env):
 
     eval_callback = EvalCallback(eval_env, best_model_save_path='./logs/',
                              log_path='./logs/', eval_freq=500,
-                             deterministic=True, render=True)
+                             deterministic=True, render=False)
     return eval_callback

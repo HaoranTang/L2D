@@ -143,7 +143,7 @@ if __name__ == '__main__':
     parser.add_argument('--log-interval', help='Override log interval (default: -1, no change)', default=100,
                         type=int)
     parser.add_argument('-f', '--log-folder', help='Log folder', type=str, default='logs')
-    parser.add_argument('-vae', '--vae-path', help='Path to saved VAE', type=str, default='logs/train_epoch_9.pth')
+    parser.add_argument('-vae', '--vae-path', help='Path to saved VAE', type=str, default='logs/train_epoch_last.pth')
     parser.add_argument('--zdim', help='Latent space dimension', type=int, default=512)
     parser.add_argument('--save-vae', action='store_true', default=False,
                         help='Save VAE')
@@ -154,3 +154,4 @@ if __name__ == '__main__':
     train(args)
     # with make_carla_client('localhost', 2000) as client:
     #     print("CarlaClient connected")
+    

@@ -56,11 +56,11 @@ def train(args, testing=True):
             optimizer.step()
 
             if i % 100 == 0:
-                print("epoch:", epoch, "train loss:", loss_value, "MSE:", MSE, "KLD: ", KLD)
+                print("epoch:", epoch, "train loss:", loss_value, "MSE:", MSE.item(), "KLD: ", KLD.item())
 
         # save checkpoint
         if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:
-            path = 'logs/train_epoch_' + str(epoch) + '.pth'
+            path = 'logs/train_epoch_last.pth'
             torch.save({
                 'epoch': epoch,
                 'model': vae.state_dict(),
@@ -75,7 +75,7 @@ if __name__ == "__main__":
                     default='./recorded_data')
     parser.add_argument('--zdim', help='Latent space dimension', type=int, default=512)
     parser.add_argument('--seed', help='Random generator seed', type=int, default=42)
-    parser.add_argument('--batch-size', help='Batch size', type=int, default=16)
+    parser.add_argument('--batch-size', help='Batch size', type=int, default=32)
     parser.add_argument('--learning-rate', help='Learning rate', type=float, default=1e-4)
     parser.add_argument('--kl-tolerance', help='KL tolerance (to cap KL loss)', type=float, default=0.5)
     parser.add_argument('--beta', help='Weight for kl loss', type=float, default=1.0)
