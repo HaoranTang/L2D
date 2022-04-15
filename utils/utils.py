@@ -113,7 +113,7 @@ def make_env(client, seed=0, log_dir=None, vae=None, frame_skip=None, n_stack=1)
 
 
 def create_test_env(client, stats_path=None, seed=0,
-                    log_dir='', hyperparams=None):
+                    log_dir='', hyperparams=None,z_dim=512):
     """
     Create environment for testing a trained agent
 
@@ -135,7 +135,7 @@ def create_test_env(client, stats_path=None, seed=0,
         vae_path = os.path.join(stats_path, 'vae.pkl')
     vae = None
     if stats_path is not None and os.path.isfile(vae_path):
-        vae = load_vae(vae_path)
+        vae = load_vae(vae_path, z_dim)
 
     env = DummyVecEnv([make_env(client, seed, log_dir, vae=vae,
                                 frame_skip=TEST_FRAME_SKIP)])
@@ -224,7 +224,7 @@ def get_saved_hyperparams(stats_path, norm_reward=False):
         if os.path.isfile(config_file):
             # Load saved hyperparameters
             with open(os.path.join(stats_path, 'config.yml'), 'r') as f:
-                hyperparams = yaml.load(f)
+                hyperparams = yaml.load(f, Loader=yaml.Loader)
             hyperparams['normalize'] = hyperparams.get('normalize', False)
         else:
             obs_rms_path = os.path.join(stats_path, 'obs_rms.pkl')
