@@ -14,6 +14,8 @@ import torch
 import carla
 from queue import Queue
 import queue
+import pygame
+import math
 
 from config import INPUT_DIM, MIN_STEERING, MAX_STEERING, JERK_REWARD_WEIGHT, MAX_STEERING_DIFF
 
@@ -68,7 +70,7 @@ class CarlaSyncMode(object):
 
 
 class Env(gym.Env):
-    def __init__(self, client, vae=None, min_throttle=0.4, max_throttle=0.6, n_command_history=20, frame_skip=1, n_stack=1, action_lambda=0.5, episode_length=800):
+    def __init__(self, client, vae=None, min_throttle=0.4, max_throttle=0.6, n_command_history=20, frame_skip=1, n_stack=1, action_lambda=0.5, episode_length=999):
         self.client = client
         self.world = self.client.get_world()
         self.frame = self.world.apply_settings(carla.WorldSettings(
@@ -113,6 +115,16 @@ class Env(gym.Env):
         self.action_lambda = action_lambda
         self.last_throttle = 0.0
         self.seed()
+
+        pygame.init()
+        self.display = pygame.display.set_mode(
+            (800, 800),
+            pygame.HWSURFACE | pygame.DOUBLEBUF)
+        self.display.fill((0,0,0))
+        
+
+    def __del__(self):
+        pygame.quit()
 
     def jerk_penalty(self):
         """
@@ -195,7 +207,8 @@ class Env(gym.Env):
         # self.client.send_control(control)
         self.vehicle.apply_control(control)
         # measurements, sensor_data = self.client.read_data()
-        velocity = self.vehicle.get_velocity().length()
+        velocity = self.vehicle.get_velocity()
+        velocity = np.around(np.sqrt(velocity.x**2 + velocity.y**2), 2)
         
         # im = self.camera_queue.get()
 
@@ -208,10 +221,15 @@ class Env(gym.Env):
         #     collision_det = None
         # else:
         #     collision_det = self.collision_queue.get()
-        snapshot, im = self.sync_mode.tick(timeout=2.0)
+        snapshot, im, im_third = self.sync_mode.tick(timeout=2.0)
+
+        # comment out when training
+        # im.save_to_disk('buffer/%08d' % im.frame)
+        im_third.save_to_disk('buffer/%08d' % im_third.frame)
                 
         im = np.array(im.raw_data).reshape((800, 800, 4))
         im = im[:, :, :3] # convert to BGR
+        self.render_img = im.copy()
         im = preprocess_image(im)
         transform = transforms.ToTensor()
         im = transform(im)[None, :]
@@ -220,8 +238,10 @@ class Env(gym.Env):
 
         observation = observation.detach().numpy()
 
+        distance_to_center_line, delta_heading = dist_to_roadline(self.world.get_map(), self.vehicle)
+
         assert(velocity is not None)
-        reward, done = self.reward(velocity, action)
+        reward, done = self.reward(self.num_step, velocity, distance_to_center_line, delta_heading, action)
 
         self.last_throttle = action[1]
 
@@ -242,7 +262,8 @@ class Env(gym.Env):
         while True:
             try:
                 bp = random.choice(self.blueprint_library.filter('vehicle.*')) # randomly choose a vehicle
-                transform = random.choice(self.world.get_map().get_spawn_points()) # randomly choose a start position
+                # transform = random.choice(self.world.get_map().get_spawn_points()) # randomly choose a start position
+                transform = self.world.get_map().get_spawn_points()[7]
                 self.vehicle = self.world.spawn_actor(bp, transform) # vehicle object
                 self.actor_list = [self.vehicle]
                 break
@@ -259,10 +280,17 @@ class Env(gym.Env):
         bound_x = 0.5 + self.vehicle.bounding_box.extent.x
         bound_y = 0.5 + self.vehicle.bounding_box.extent.y
         bound_z = 0.5 + self.vehicle.bounding_box.extent.z
-        camera_location = carla.Location(x=-2.0*bound_x, y=+0.0*bound_y, z=2.0*bound_z)
-        camera_rotation = carla.Rotation(8.0, 0.0, 0.0)
+        camera_location_third = carla.Location(x=-2.0*bound_x, y=+0.0*bound_y, z=2.0*bound_z)
+        camera_rotation_third = carla.Rotation(8.0, 0.0, 0.0)
+        camera_transform_third = carla.Transform(camera_location_third, camera_rotation_third)
+        self.camera_third = self.world.spawn_actor(camera_bp, camera_transform_third, attach_to=self.vehicle, attachment_type=carla.AttachmentType.Rigid)
+        self.actor_list.append(self.camera_third)
+
+        camera_location = carla.Location(x=+0.8*bound_x, y=+0.0*bound_y, z=1.3*bound_z)
+        camera_rotation = carla.Rotation(0.0, 0.0, 0.0)
         camera_transform = carla.Transform(camera_location, camera_rotation)
-        self.camera = self.world.spawn_actor(camera_bp, camera_transform, attach_to=self.vehicle, attachment_type=carla.AttachmentType.SpringArm)
+        # self.camera = self.world.spawn_actor(camera_bp, camera_transform, attach_to=self.vehicle, attachment_type=carla.AttachmentType.SpringArm)
+        self.camera = self.world.spawn_actor(camera_bp, camera_transform, attach_to=self.vehicle, attachment_type=carla.AttachmentType.Rigid)
         self.actor_list.append(self.camera)
         # self.camera_queue = Queue()
 
@@ -306,11 +334,12 @@ class Env(gym.Env):
             # print("MARK 5.1")
         # else:
 
-        self.sync_mode = CarlaSyncMode(self.world, self.camera)
-        snapshot, im = self.sync_mode.tick(timeout=2.0)
+        self.sync_mode = CarlaSyncMode(self.world, self.camera, self.camera_third)
+        snapshot, im, im_third = self.sync_mode.tick(timeout=2.0)
 
         im = np.array(im.raw_data).reshape((800, 800, 4))
         im = im[:, :, :3] # convert to BGR
+        self.render_img = im.copy()
         im = preprocess_image(im)
         transform = transforms.ToTensor()
         im = transform(im)[None, :]
@@ -332,29 +361,36 @@ class Env(gym.Env):
         return observation
 
 
-    def reward(self, velocity, action):
+    def reward(self, num_step, velocity, distance_to_center_line, delta_heading, action):
         """
         :param measurements:
         :return: reward, done
         """
         done = False
 
-        """speed"""
         # # In the wayve.ai paper, speed has been used as reward
-        speed_reward = 10 * velocity
+        speed_reward = 1.0*velocity
+        step_reward = 0.001*num_step
+        # throttle_reward = 0.1*(self.last_throttle/0.6)
+        center_line_reward = -10 * distance_to_center_line
+        heading_reward = -delta_heading
+
+        rewards = speed_reward + center_line_reward + heading_reward
+
+        # print("rew:", speed_reward, center_line_reward, heading_reward)
 
         """road"""
         if not self.collision_queue.empty():
             self.collision_queue = Queue()
             self.lane_queue = Queue()
-            return -100.0, True
+            return -1000.0, True
 
         if not self.lane_queue.empty():
             self.collision_queue = Queue()
             self.lane_queue = Queue()
-            return -10.0, True
+            return -1000.0, True
 
-        return speed_reward, done
+        return rewards, done
     
     def destroy_agents(self):
         for actor in self.actor_list:
@@ -376,6 +412,10 @@ class Env(gym.Env):
         self.lane_queue = Queue()
         self.collision_queue = Queue()
 
+    def render(self, mode=None):
+        array = self.render_img[:, :, ::-1]
+        self.surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
+        self.display.blit(self.surface, (0, 0))
 
 
 def preprocess_image(image, convert_to_rgb=False):
@@ -396,3 +436,23 @@ def preprocess_image(image, convert_to_rgb=False):
         im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
 
     return im
+
+def dist_to_roadline(carla_map, vehicle):
+    location = vehicle.get_transform().location
+    rotation = vehicle.get_transform().rotation
+    nearest_wp = carla_map.get_waypoint(location, project_to_road=True)
+    wp_heading = nearest_wp.transform.rotation.yaw
+    delta_heading = np.abs(rotation.yaw - wp_heading)
+    if delta_heading <= 180:
+        delta_heading = delta_heading
+    elif delta_heading > 180 and delta_heading <= 360:
+        delta_heading = 360 - delta_heading
+    else:
+        delta_heading = delta_heading - 360
+
+    distance_to_center_line = np.sqrt(
+        (location.x - nearest_wp.transform.location.x) ** 2 +
+        (location.y - nearest_wp.transform.location.y) ** 2
+    )
+
+    return distance_to_center_line, delta_heading

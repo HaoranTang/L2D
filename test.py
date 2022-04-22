@@ -12,6 +12,7 @@ from utils.utils import ALGOS, create_test_env, get_latest_run_id, get_saved_hyp
 
 from environment.carla.tcp import TCPConnectionError
 import carla
+import pygame
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-f', '--folder', help='Log folder', type=str, default='logs')
@@ -77,32 +78,36 @@ try:
 
     model = ALGOS[algo].load(model_path)
 
-    obs = env.reset()
-
     # Force deterministic for SAC and DDPG
     deterministic = args.deterministic or algo in ['ddpg', 'sac']
     if args.verbose >= 1:
         print("Deterministic actions: {}".format(deterministic))
 
-    running_reward = 0.0
-    ep_len = 0
-    for i in range(args.n_timesteps):
-        # print('{}th timestep:'.format(i))
-        action, _ = model.predict(obs, deterministic=deterministic)
-        # Clip Action to avoid out of bound errors
-        if isinstance(env.action_space, gym.spaces.Box):
-            action = np.clip(action, env.action_space.low, env.action_space.high)
-        obs, reward, done, infos = env.step(action)
-        running_reward += reward[0]
-        ep_len += 1
+    for _ in range(1):
+        running_reward = 0.0
+        ep_len = 0
+        obs = env.reset()
 
-        if done and args.verbose >= 1:
-            # NOTE: for env using VecNormalize, the mean reward
-            # is a normalized reward when `--norm_reward` flag is passed
-            print("Episode Reward: {:.2f}".format(running_reward))
-            print("Episode Length", ep_len)
-            running_reward = 0.0
-            ep_len = 0
+        while True:
+            # print('{}th timestep:'.format(i))
+            action, _ = model.predict(obs, deterministic=deterministic)
+            # Clip Action to avoid out of bound errors
+            if isinstance(env.action_space, gym.spaces.Box):
+                action = np.clip(action, env.action_space.low, env.action_space.high)
+            obs, reward, done, infos = env.step(action)
+            running_reward += reward[0]
+            ep_len += 1
+            env.render()
+            pygame.display.flip()
+
+            if done and args.verbose >= 1:
+                # NOTE: for env using VecNormalize, the mean reward
+                # is a normalized reward when `--norm_reward` flag is passed
+                print("Episode Reward: {:.2f}".format(running_reward))
+                print("Episode Length", ep_len)
+                # running_reward = 0.0
+                # ep_len = 0
+                break
 
 except TCPConnectionError as error:
     print(error)

@@ -88,7 +88,7 @@ def train(args):
         print("Stacking {} frames".format(n_stack))
         del hyperparams['frame_stack']
 
-    # Parse noise string for DDPG
+    # Parse noises
     if args.algo == 'ddpg' and hyperparams.get('noise_type') is not None:
         noise_type = hyperparams['noise_type'].strip()
         noise_std = hyperparams['noise_std']
@@ -107,6 +107,8 @@ def train(args):
         print("Applying {} noise with std {}".format(noise_type, noise_std))
         del hyperparams['noise_type']
         del hyperparams['noise_std']
+    elif args.algo == 'sac':
+        hyperparams['action_noise'] = NormalActionNoise(mean=np.array([0, 0]), sigma=np.array([0.2, 0.2]))
 
     # Train an agent from scratch
     model = ALGOS[args.algo](env=env, tensorboard_log=tensorboard_log, verbose=1, **hyperparams)
@@ -117,7 +119,8 @@ def train(args):
 
     if args.algo == 'sac':
         kwargs.update({'callback': create_callback(eval_env)})
-
+    
+    print("Learn for {} timesteps".format(n_timesteps))
     model.learn(n_timesteps, **kwargs)
 
     # Save trained model
@@ -138,7 +141,7 @@ if __name__ == '__main__':
                         default='', type=str)
     parser.add_argument('--algo', help='RL Algorithm', default='sac',
                         type=str, required=False, choices=list(ALGOS.keys()))
-    parser.add_argument('-n', '--n-timesteps', help='Overwrite the number of timesteps', default=10000,
+    parser.add_argument('-n', '--n-timesteps', help='Overwrite the number of timesteps', default=50000,
                         type=int)
     parser.add_argument('--log-interval', help='Override log interval (default: -1, no change)', default=100,
                         type=int)
