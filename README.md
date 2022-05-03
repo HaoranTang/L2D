@@ -1,5 +1,4 @@
 # ESE 650 Final Project: Learning to Drive in a Day
-##### Qirui Wu, wuqirui@seas; Haoran Tang, thr99@seas
 ---
 #### 0. Requirements
 1) Please use Python 3.7 with latest PyTorch and Stable-Baselines 3 for this project, and install Carla 0.9.13 + UE4.
