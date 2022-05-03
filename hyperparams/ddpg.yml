@@ -1,13 +1,17 @@
 Env:
   n_timesteps: !!float 5000
   policy: 'CustomDDPGPolicy'
+  learning_rate: !!float 3e-4
+  buffer_size: 30000
   noise_type: 'ornstein-uhlenbeck'
   # noise_type: 'adaptive-param'
   noise_std: 0.2
-  memory_limit: 10000
+  # memory_limit: 10000
   batch_size: 64
-  clip_norm: 0.005
+  # clip_norm: 0.005
   gamma: 0.99
-  nb_train_steps: 300
+  # nb_train_steps: 300
   # normalize_observations: True
   # normalize_returns: True
+  gradient_steps: 600
+  learning_starts: 300

@@ -117,10 +117,15 @@ def train(args):
     if args.log_interval > -1:
         kwargs = {'log_interval': args.log_interval}
 
-    if args.algo == 'sac':
-        kwargs.update({'callback': create_callback(eval_env)})
+    # if args.algo == 'sac':
+    kwargs.update({'callback': create_callback(eval_env)})
     
     print("Learn for {} timesteps".format(n_timesteps))
+    # Or in-place load
+    if args.trained_agent:
+        model.set_parameters(args.trained_agent)
+        print("LOADED MODEL:")
+        print(model.get_parameters())
     model.learn(n_timesteps, **kwargs)
 
     # Save trained model
@@ -138,7 +143,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-tb', '--tensorboard-log', help='Tensorboard log dir', default='', type=str)
     parser.add_argument('-i', '--trained-agent', help='Path to a pretrained agent to continue training',
-                        default='', type=str)
+                        default='logs/sac/Carla-v0_27/Carla-v0.zip', type=str)
     parser.add_argument('--algo', help='RL Algorithm', default='sac',
                         type=str, required=False, choices=list(ALGOS.keys()))
     parser.add_argument('-n', '--n-timesteps', help='Overwrite the number of timesteps', default=50000,

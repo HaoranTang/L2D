@@ -16,7 +16,7 @@ import pygame
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-f', '--folder', help='Log folder', type=str, default='logs')
-parser.add_argument('--algo', help='RL Algorithm', default='sac',
+parser.add_argument('--algo', help='RL Algorithm', default='ddpg',
                     type=str, required=False, choices=list(ALGOS.keys()))
 parser.add_argument('-n', '--n-timesteps', help='number of timesteps', default=2000,
                     type=int)
@@ -83,7 +83,7 @@ try:
     if args.verbose >= 1:
         print("Deterministic actions: {}".format(deterministic))
 
-    for _ in range(1):
+    for _ in range(10):
         running_reward = 0.0
         ep_len = 0
         obs = env.reset()

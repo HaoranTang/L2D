@@ -13,12 +13,13 @@ from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.policies import register_policy
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize, VecFrameStack
 from stable_baselines3.sac import MlpPolicy as SACPolicy
+from stable_baselines3.sac import CnnPolicy as SACCnnPolicy
 from stable_baselines3.ddpg import MlpPolicy as DDPGPolicy
 from stable_baselines3.common.callbacks import EvalCallback
 
 # from algos import DDPG, SAC
 from stable_baselines3 import DDPG, SAC
-from environment.env import Env
+from environment.env import Env, NewEnv
 
 from vae.model import VAE
 from config import MIN_THROTTLE, MAX_THROTTLE, FRAME_SKIP, N_COMMAND_HISTORY, TEST_FRAME_SKIP
@@ -48,14 +49,16 @@ class CustomSACPolicy(SACPolicy):
     def __init__(self, *args, **kwargs):
         super(CustomSACPolicy, self).__init__(*args, **kwargs,
                                               net_arch=[64, 64])
+# uncomment for SAC-CNN
+# class CustomSACPolicy(SACCnnPolicy):
+#     def __init__(self, *args, **kwargs):
+#         super(CustomSACPolicy, self).__init__(*args, **kwargs)
                                     
 
 class CustomDDPGPolicy(DDPGPolicy):
     def __init__(self, *args, **kwargs):
         super(CustomDDPGPolicy, self).__init__(*args, **kwargs,
-                                               layers=[32, 8],
-                                               feature_extraction="mlp",
-                                               layer_norm=True)
+                                               net_arch=[64, 64])
 
 
 register_policy('CustomDDPGPolicy', CustomDDPGPolicy)
@@ -105,6 +108,11 @@ def make_env(client, seed=0, log_dir=None, vae=None, frame_skip=None, n_stack=1)
         env = Env(client, frame_skip=frame_skip, vae=vae, min_throttle=MIN_THROTTLE,
             max_throttle=MAX_THROTTLE, n_command_history=N_COMMAND_HISTORY,
             n_stack=n_stack)
+
+        # CNN env
+        # env = NewEnv(client, frame_skip=frame_skip, vae=vae, min_throttle=MIN_THROTTLE,
+        #     max_throttle=MAX_THROTTLE, n_command_history=N_COMMAND_HISTORY,
+        #     n_stack=n_stack)
         env.seed(seed)
         env = Monitor(env, log_dir, allow_early_resets=True)
         return env
